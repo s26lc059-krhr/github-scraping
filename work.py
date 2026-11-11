@@ -6,12 +6,17 @@ import pandas as pd
 from bs4 import BeautifulSoup
 
 url = 'https://github.com/orgs/google/repositories'
-headers = {'User-Agent': 'Mozilla/5.0'}
 DB_path = 'github.sqlite'
-MAX_PAGES = 3
+MAX_PAGES = None
+
+session = requests.Session()
+session.headers.update({
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36''(KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+    'Accept-Language': 'en-US, en; q=0.9',
+})
 
 def fetch_page(page):
-    res = requests.get(url, headers=headers, params={'page': page})
+    res = session.get(url, params={'page': page}, timeout=30)
     res.raise_for_status()
     res.encoding = 'utf-8'
     soup = BeautifulSoup(res.text, 'html.parser')
