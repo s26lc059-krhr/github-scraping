@@ -2,6 +2,7 @@ import json
 import sqlite3
 import time
 import requests
+import pandas as pd
 from bs4 import BeautifulSoup
 
 url = 'https://github.com/orgs/google/repositories'
@@ -51,4 +52,10 @@ while True:
     page += 1
     time.sleep(1)
 
+con.close()
+
+pd.set_option('display.unicode.east_asian_width', True)
+
+con = sqlite3.connect(DB_path)
+print(pd.read_sql('SELECT * FROM repos ORDER BY stars DESC LIMIT 20;', con))
 con.close()
