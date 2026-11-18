@@ -1,6 +1,6 @@
 # github-scraping
 
-GitHubの Google 公式組織(`google`)が管理するリポジトリの情報を
+GitHubの Google が管理するリポジトリの情報を
 スクレイピングで取得し、SQLite に保存するプログラムです。
 (データサイエンスプログラミング1 最終課題)
 
@@ -21,7 +21,6 @@ https://github.com/orgs/google/repositories
 ```
 github-scraping/
 ├── work.py          # 1ページ目から最終ページまで取得するメインプログラム
-├── work2.py         # アクセス制限(429)で中断した分を補完取得するプログラム
 ├── README.md
 └── .gitignore       # github.sqlite などを管理対象外にする
 ```
@@ -49,12 +48,7 @@ python work.py
 ```
 
 途中で `429 Too Many Requests` により中断した場合は、
-中断したページ以降を `work2.py` で補完します。
-`START_PAGE` と `END_PAGE` を必要に応じて書き換えてから実行してください。
-
-```bash
-python work2.py
-```
+`START_PAGE` を書き換えて再実行
 
 ### 3. 保存したデータの確認
 
@@ -80,15 +74,13 @@ SELECT * FROM repos ORDER BY stars DESC LIMIT 10;
 
 ## 工夫した点
 
-- 途中で `429 Too Many Requests` が発生したため、
-  `work2.py` では `Retry-After` に従って待機・再試行する処理を追加しました。
 - ページごとに `commit()` することで、中断してもそれまでのデータが失われないようにしました。
-- 全99ページを取得する途中で、429 Too Many Requests によりアクセスが制限されました。 
-そのため、リクエスト間隔を空け、Retry-After に従って待機・再試行する処理を追加し、
-中断した分を work2.py で補完しました。
+- 全99ページを取得する途中で、`429 Too Many Requests` によりアクセスが制限されました。
+  そのため、`Retry-After` に従って待機・再試行する処理を追加しました。
+  また、`START_PAGE` を書き換えて再実行すれば、中断したページから続きを取得できるようにしました。
 
 ## 注意事項
 
 - 取得中にリポジトリの並び順(最終更新順)が変化するため、
-  件数が公式の表示(約2,945件)と数件ずれる場合があります。
+  件数が公式の表示(約2,948件)と数件ずれる場合があります。
 - スクレイピングは対象サイトの利用規約・負荷に配慮して行ってください。

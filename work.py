@@ -11,33 +11,47 @@ url = 'https://github.com/orgs/google/repositories'
 # 保存先のSQLiteファイル名
 DB_path = 'github.sqlite'
 
-# 取得する最大ページ数(None の場合は最終ページまで取得)
-MAX_PAGES = None
+# 取得するページの範囲
+START_PAGE = 1    # 状況に応じて変更可(中断したページ番号に合わせる)
+END_PAGE = None   # None の場合は最終ページ(pageCount)まで取得
 
-# Sessionを使うと、ヘッダーやCookieを引き継いで複数回リクエストできる
 session = requests.Session()
 session.headers.update({
-    # ブラウザからのアクセスに見せるための User-Agent
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
                   '(KHTML, like Gecko) Chrome/124.0 Safari/537.36',
     'Accept-Language': 'en-US,en;q=0.9',
 })
 
 
-def fetch_page(page):
-    """指定したページを取得し、埋め込まれているJSONデータを返す"""
-    res = session.get(url, params={'page': page}, timeout=30)
-    res.raise_for_status()      # 200以外(429など)ならエラーにする
-    res.encoding = 'utf-8'      # 文字化け防止
+def fetch_page(page, max_retries=6):
+    """指定ページを取得する。429や接続エラーの場合は待機して再試行する"""
+    for attempt in range(max_retries):
+        try:
+            res = session.get(url, params={'page': page}, timeout=30)
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout) as e:
+            # 接続が切れた/タイムアウトした場合も待機して再試行
+            wait = 30 * (attempt + 1)
+            print(f'  接続エラー、{wait}秒待機して再試行します({attempt + 1}/{max_retries})')
+            time.sleep(wait)
+            continue
 
-    # HTMLを解析し、リポジトリ情報が入っているJSONの<script>タグを探す
-    soup = BeautifulSoup(res.text, 'html.parser')
-    tag = soup.select_one('script[data-target="react-app.embeddedData"]')
-    data = json.loads(tag.string)
-    return data['payload']['orgReposPageRoute']
+        if res.status_code == 429:
+            wait = int(res.headers.get('Retry-After', 60 * (attempt + 1)))
+            print(f'  429、{wait}秒待機して再試行します({attempt + 1}/{max_retries})')
+            time.sleep(wait)
+            continue
+
+        res.raise_for_status()
+        res.encoding = 'utf-8'
+        soup = BeautifulSoup(res.text, 'html.parser')
+        tag = soup.select_one('script[data-target="react-app.embeddedData"]')
+        data = json.loads(tag.string)
+        return data['payload']['orgReposPageRoute']
+
+    raise RuntimeError(f'{page}ページ目は{max_retries}回再試行しても失敗しました')
 
 
-# --- DBへ接続し、テーブルを作成する ---
 con = sqlite3.connect(DB_path)
 cur = con.cursor()
 cur.execute('''
@@ -48,31 +62,22 @@ cur.execute('''
     );
 ''')
 
-# --- 1ページ目から順にスクレイピングする ---
-page = 1
-last_page = None
+page = START_PAGE
 while True:
     route = fetch_page(page)
 
-    # 初回のみ、最終ページ番号(pageCount)を取得する
-    if last_page is None:
-        last_page = route['pageCount']
-        if MAX_PAGES:
-            last_page = min(last_page, MAX_PAGES)
+    # 最終ページが未指定なら、取得したデータの pageCount を使う
+    if END_PAGE is None:
+        END_PAGE = route['pageCount']
 
-    # 1ページ分のリポジトリをDBに保存する
     for repo in route['repositories']:
-        # 主要な言語が設定されていないリポジトリは None にする
         lang = repo['primaryLanguage']['name'] if repo['primaryLanguage'] else None
-        # INSERT OR REPLACE:同じnameがあれば上書きする
-        cur.execute(
-            'INSERT OR REPLACE INTO repos VALUES(?, ?, ?)',
-            (repo['name'], lang, repo['starsCount'])
-        )
-    con.commit()    # ページごとに保存
-    print(f'page{page}/{last_page}done')
+        cur.execute('INSERT OR REPLACE INTO repos VALUES(?, ?, ?)',
+                    (repo['name'], lang, repo['starsCount']))
+    con.commit()
+    print(f'page {page}/{END_PAGE} done')
 
-    if page >= last_page:
+    if page >= END_PAGE:
         break
     page += 1
     time.sleep(1)
@@ -80,9 +85,8 @@ while True:
 con.close()
 
 # --- 保存したデータをSELECT文で表示する ---
-# 日本語(全角文字)でも列がずれないようにする設定
 pd.set_option('display.unicode.east_asian_width', True)
-
 con = sqlite3.connect(DB_path)
+print(pd.read_sql('SELECT COUNT(*) AS total FROM repos;', con))
 print(pd.read_sql('SELECT * FROM repos ORDER BY stars DESC LIMIT 20;', con))
 con.close()
